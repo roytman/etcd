@@ -41,7 +41,7 @@ func New(fs *fperf.FlagSet) fperf.Client {
 	var trxSize int
 	var op Op
 	fs.IntVar(&keySize, "key-size", 4, "length of the random key")
-	fs.IntVar(&trxSize, "trx-size", 129, "length of the transaction key")
+	fs.IntVar(&trxSize, "trx-size", 129, "number of operations in the transaction")
 	fs.Parse()
 	args := fs.Args()
 	if len(args) == 0 {
