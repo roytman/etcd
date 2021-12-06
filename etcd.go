@@ -12,6 +12,8 @@ import (
 	"go.etcd.io/etcd/clientv3"
 )
 
+const validKeyValueBytes = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+
 func init() {
 	fperf.Register("etcd", New, "etcd benchmark")
 }
@@ -30,18 +32,19 @@ const (
 
 type client struct {
 	etcd    *clientv3.Client
-	space   *keySpace
+	keySpace   *randSpace
+	valueSpace   *randSpace
 	op      Op
 	ops  []clientv3.Op
 }
 
 // New creates a fperf client
 func New(fs *fperf.FlagSet) fperf.Client {
-	var keySize int
-	var trxSize int
+	var keySize,valueSize,trxSize int
 	var op Op
-	fs.IntVar(&keySize, "key-size", 4, "length of the random key")
-	fs.IntVar(&trxSize, "trx-size", 129, "number of operations in the transaction")
+	fs.IntVar(&keySize, "key-size", 8, "length of the random key")
+	fs.IntVar(&valueSize, "value-size", 8, "length of the random value")
+	fs.IntVar(&trxSize, "trx-size", 128, "number of operations in the transaction")
 	fs.Parse()
 	args := fs.Args()
 	if len(args) == 0 {
@@ -52,25 +55,26 @@ func New(fs *fperf.FlagSet) fperf.Client {
 			trxSize, _ = strconv.Atoi(args[1])
 		}
 	}
-	cl := &client{
-		space:   newKeySpace(keySize),
+	c := &client{
+		keySpace:   newRandSpace(keySize),
+		valueSpace:   newRandSpace(valueSize),
 		op:      op,
 	}
-	if cl.op == Trx {
+	if c.op == Trx {
 		var ops  []clientv3.Op
 		keys := map[string]string{}
 		for i := 0; i< trxSize; i++ {
-			key := cl.space.randKey()
+			key := c.keySpace.randString()
 			if _, ok := keys[key]; ok {
 				continue
 			}
 			keys[key] = key
-			value := key
+			value := c.valueSpace.randString()
 			ops = append(ops, clientv3.OpPut(key, value))
 		}
-		cl.ops = ops
+		c.ops = ops
 	}
-	return cl
+	return c
 }
 
 // Dial to etcd
@@ -106,21 +110,21 @@ func (c *client) Request() error {
 }
 
 func doPut(c *client) error {
-	key := c.space.randKey()
-	value := key
+	key := c.keySpace.randString()
+	value := c.valueSpace.randString()
 	_, err := c.etcd.Put(context.Background(), key, value)
 	return err
 }
 func doGet(c *client) error {
-	_, err := c.etcd.Get(context.Background(), c.space.randKey())
+	_, err := c.etcd.Get(context.Background(), c.keySpace.randString())
 	return err
 }
 func doDelete(c *client) error {
-	_, err := c.etcd.Delete(context.Background(), c.space.randKey())
+	_, err := c.etcd.Delete(context.Background(), c.keySpace.randString())
 	return err
 }
 func doRange(c *client) error {
-	start, end := c.space.randRange()
+	start, end := c.keySpace.randRange()
 	_, err := c.etcd.Get(context.Background(), start, clientv3.WithRange(end))
 	return err
 }
@@ -132,25 +136,27 @@ func doTrx(c *client) error {
 	return err
 }
 
-type keySpace struct {
+type randSpace struct {
 	r      *rand.Rand
 	nbytes int
 }
 
-func newKeySpace(nbytes int) *keySpace {
-	return &keySpace{
+func newRandSpace(nbytes int) *randSpace {
+	return &randSpace{
 		r:      rand.New(rand.NewSource(time.Now().Unix())),
 		nbytes: nbytes,
 	}
 }
 
-func (ks *keySpace) randKey() string {
+func (ks *randSpace) randString() string {
 	p := make([]byte, ks.nbytes)
-	ks.r.Read(p)
+    for i := range p {
+        p[i] = validKeyValueBytes[rand.Intn(len(validKeyValueBytes))]
+    }
 	return string(p)
 }
-func (ks *keySpace) randRange() (string, string) {
-	start := []byte(ks.randKey())
+func (ks *randSpace) randRange() (string, string) {
+	start := []byte(ks.randString())
 	if len(start) == 0 {
 		return "", ""
 	}
